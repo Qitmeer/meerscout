@@ -39,7 +39,7 @@ See the [project documentation](https://docs.blockscout.com/) for instructions:
 - Deploy Meer EVM Explorer
  
   - `./docker-compose/proxy/default.conf.template` replace allow origin http://localhost to your ip or domain
-  - `./docker-compose/envs/common-blockscout-meer.yml` replace the `meernode` to you qng node evm rpc
+  - `./docker-compose/envs/common-blockscout-meer.yml` replace the `meernode` to you qng node evm rpc, replace the `CHAIN_ID`
   
   - `./docker-compose/envs/common-frontend-meer.env` replace the `meernode` to you qng node evm rpc, replace `localhost` to your domain or ip
 ```bash
