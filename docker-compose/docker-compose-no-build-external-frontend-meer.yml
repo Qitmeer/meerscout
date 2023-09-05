@@ -35,6 +35,9 @@ services:
       ETHEREUM_JSONRPC_WS_URL: ws://host.docker.internal:18546/
       INDEXER_DISABLE_INTERNAL_TRANSACTIONS_FETCHER: 'false'
       INDEXER_DISABLE_PENDING_TRANSACTIONS_FETCHER: 'false'
+      INDEXER_MEMORY_LIMIT: '2Gb'
+      INDEXER_CATCHUP_BLOCKS_BATCH_SIZE: '5'
+      INDEXER_CATCHUP_BLOCKS_CONCURRENCY: '2'
       DATABASE_URL: postgresql://postgres:@host.docker.internal:7432/blockscout?ssl=false
       ECTO_USE_SSL: 'false'
       SECRET_KEY_BASE: '56NtB48ear7+wMSf0IQuWDAAazhpb31qyc7GiyspBP2vh7t5zlCsF5QDv76chXeN'
