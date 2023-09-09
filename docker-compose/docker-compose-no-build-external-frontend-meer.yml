@@ -42,6 +42,10 @@ services:
       API_V2_ENABLED: 'true'
       MIX_ENV: 'prod'
       ACCOUNT_ENABLED: 'false'
+      EXCHANGE_RATES_MARKET_CAP_SOURCE: 'coin_market_cap'
+      EXCHANGE_RATES_PRICE_SOURCE: 'coin_market_cap'
+      EXCHANGE_RATES_COINMARKETCAP_API_KEY: 'b082eb60-9ca2-43a8-817e-5df872cbba64'
+      EXCHANGE_RATES_COINMARKETCAP_COIN_ID: 'qitmeer-network'
     ports:
       - 4000:4000
     volumes:
