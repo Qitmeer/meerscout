@@ -80,11 +80,3 @@ services:
     extends:
       file: ./services/docker-compose-stats.yml
       service: stats
-
-  proxy:
-    depends_on:
-      - backend
-      - stats
-    extends:
-      file: ./services/docker-compose-nginx.yml
-      service: proxy
