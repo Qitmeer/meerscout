@@ -45,6 +45,9 @@ services:
       API_V2_ENABLED: 'true'
       MIX_ENV: 'prod'
       ACCOUNT_ENABLED: 'false'
+      MICROSERVICE_SC_VERIFIER_URL: 'http://host.docker.internal:8150/'
+      MICROSERVICE_VISUALIZE_SOL2UML_URL: 'http://host.docker.internal:8152/'
+      MICROSERVICE_SIG_PROVIDER_URL: 'http://host.docker.internal:8151/'
     ports:
       - 4000:4000
     volumes:
