@@ -14,13 +14,12 @@ services:
   backend:
     depends_on:
       - db
-      - smart-contract-verifier
       - redis_db
     image: blockscout/blockscout:${DOCKER_TAG:-master}
     pull_policy: always
     restart: always
     stop_grace_period: 5m
-    container_name: 'blockscout'
+    container_name: 'backend'
     links:
       - db:database
     command: sh -c "bin/blockscout eval \"Elixir.Explorer.ReleaseTasks.create_and_migrate()\" && bin/blockscout start"
@@ -39,24 +38,13 @@ services:
       INDEXER_CATCHUP_BLOCKS_BATCH_SIZE: '5'
       INDEXER_CATCHUP_BLOCKS_CONCURRENCY: '2'
       DATABASE_URL: postgresql://postgres:@host.docker.internal:7432/blockscout?ssl=false
-      ECTO_USE_SSL: 'false'
-      SECRET_KEY_BASE: '56NtB48ear7+wMSf0IQuWDAAazhpb31qyc7GiyspBP2vh7t5zlCsF5QDv76chXeN'
       CHAIN_ID: '8131'
-      API_V2_ENABLED: 'true'
-      MIX_ENV: 'prod'
-      ACCOUNT_ENABLED: 'false'
-      MICROSERVICE_SC_VERIFIER_URL: 'http://host.docker.internal:8150/'
       MICROSERVICE_VISUALIZE_SOL2UML_URL: 'http://host.docker.internal:8152/'
       MICROSERVICE_SIG_PROVIDER_URL: 'http://host.docker.internal:8151/'
     ports:
       - 4000:4000
     volumes:
       - ./logs/:/app/logs/
-
-  smart-contract-verifier:
-    extends:
-      file: ./services/docker-compose-smart-contract-verifier.yml
-      service: smart-contract-verifier
 
   visualizer:
     extends:
