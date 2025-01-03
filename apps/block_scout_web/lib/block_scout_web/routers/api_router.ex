@@ -190,6 +190,7 @@ defmodule BlockScoutWeb.Routers.ApiRouter do
 
     scope "/blocks" do
       get("/", V2.BlockController, :blocks)
+      get("/qitmeer", V2.QitmeerController, :qitmeer_blocks)
       get("/:block_hash_or_number", V2.BlockController, :block)
       get("/:block_hash_or_number/transactions", V2.BlockController, :transactions)
       get("/:block_hash_or_number/internal-transactions", V2.BlockController, :internal_transactions)
