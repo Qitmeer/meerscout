@@ -30,6 +30,7 @@ defmodule Indexer.Block.Realtime.Fetcher do
       fetch_and_import_range: 2
     ]
 
+  import Indexer.Block.QitmeerFetcher, only: [qng_fetch_and_import_range: 3]
   alias Ecto.Changeset
   alias EthereumJSONRPC.Subscription
   alias Explorer.Chain
@@ -52,6 +53,7 @@ defmodule Indexer.Block.Realtime.Fetcher do
   defstruct block_fetcher: nil,
             subscription: nil,
             previous_number: nil,
+            qitmeer_previous_number: nil,
             timer: nil
 
   @type t :: %__MODULE__{
@@ -64,6 +66,7 @@ defmodule Indexer.Block.Realtime.Fetcher do
           },
           subscription: Subscription.t(),
           previous_number: pos_integer() | nil,
+          qitmeer_previous_number: pos_integer() | nil,
           timer: reference()
         }
 
@@ -93,6 +96,7 @@ defmodule Indexer.Block.Realtime.Fetcher do
           block_fetcher: %Block.Fetcher{} = block_fetcher,
           subscription: %Subscription{} = subscription,
           previous_number: previous_number,
+          qitmeer_previous_number: qitmeer_previous_number,
           timer: timer
         } = state
       )
@@ -106,7 +110,7 @@ defmodule Indexer.Block.Realtime.Fetcher do
     # Subscriptions don't support getting all the blocks and transactions data,
     # so we need to go back and get the full block
     start_fetch_and_import(number, block_fetcher, previous_number)
-
+    start_qng_fetch_and_import(number, block_fetcher, qitmeer_previous_number)
     Process.cancel_timer(timer)
     new_timer = schedule_polling()
 
@@ -123,11 +127,12 @@ defmodule Indexer.Block.Realtime.Fetcher do
         :poll_latest_block_number,
         %__MODULE__{
           block_fetcher: %Block.Fetcher{json_rpc_named_arguments: json_rpc_named_arguments} = block_fetcher,
-          previous_number: previous_number
+          previous_number: previous_number,
+          qitmeer_previous_number: qitmeer_previous_number
         } = state
       ) do
     new_previous_number =
-      case EthereumJSONRPC.fetch_block_number_by_tag("latest", json_rpc_named_arguments) do
+      case QitmeerJSONRPC.fetch_block_number_by_stateroot(json_rpc_named_arguments) do
         {:ok, number} when is_nil(previous_number) or number != previous_number ->
           number =
             if abnormal_gap?(number, previous_number) do
@@ -146,12 +151,29 @@ defmodule Indexer.Block.Realtime.Fetcher do
           previous_number
       end
 
+    new_qitmeer_previous_number =
+      case QitmeerJSONRPC.qng_fetch_latest_block_number(json_rpc_named_arguments) do
+        {:ok, number} when is_nil(qitmeer_previous_number) or number != qitmeer_previous_number ->
+          if abnormal_gap?(number, qitmeer_previous_number) do
+            new_number = max(number, qitmeer_previous_number)
+            start_qng_fetch_and_import(new_number, block_fetcher, qitmeer_previous_number)
+            new_number
+          else
+            start_qng_fetch_and_import(number, block_fetcher, qitmeer_previous_number)
+            number
+          end
+
+        _ ->
+          qitmeer_previous_number
+      end
+
     timer = schedule_polling()
 
     {:noreply,
      %{
        state
        | previous_number: new_previous_number,
+         qitmeer_previous_number: new_qitmeer_previous_number,
          timer: timer
      }}
   end
@@ -486,5 +508,51 @@ defmodule Indexer.Block.Realtime.Fetcher do
     async_import_polygon_zkevm_bridge_l1_tokens(imported)
     async_import_celo_epoch_block_operations(imported, realtime?)
     async_import_filecoin_addresses_info(imported, realtime?)
+  end
+
+  def start_qng_fetch_and_import(number, block_fetcher, previous_number) do
+    start_at = determine_start_at(number, previous_number)
+    is_reorg = reorg?(number, previous_number)
+
+    for block_number_to_fetch <- start_at..number do
+      args = [block_number_to_fetch, block_fetcher, is_reorg]
+
+      Task.Supervisor.start_child(TaskSupervisor, __MODULE__, :qng_fetch_and_import_block, args,
+        shutdown: @shutdown_after
+      )
+    end
+  end
+
+  @decorate trace(
+              name: "fetch",
+              resource: "Indexer.Block.Realtime.Fetcher.qng_fetch_and_import_block/3",
+              tracer: Tracer
+            )
+  def qng_fetch_and_import_block(block_number_to_fetch, block_fetcher, reorg?, retry \\ 3) do
+    Process.flag(:trap_exit, true)
+
+    Indexer.Logger.metadata(
+      fn ->
+        if reorg? do
+          # give previous fetch attempt (for same block number) a chance to finish
+          # before fetching again, to reduce block consensus mistakes
+          :timer.sleep(@reorg_delay)
+        end
+
+        qng_do_fetch_and_import_block(block_number_to_fetch, block_fetcher, retry)
+      end,
+      fetcher: :block_realtime,
+      block_number: block_number_to_fetch
+    )
+  end
+
+  @decorate span(tracer: Tracer)
+  defp qng_do_fetch_and_import_block(block_number_to_fetch, block_fetcher, _retry) do
+    # time_before = Timex.now()
+
+    :timer.tc(fn -> qng_fetch_and_import_range(block_fetcher, block_number_to_fetch..block_number_to_fetch, false) end)
+
+    # Prometheus.Instrumenter.block_full_process(fetch_duration, __MODULE__)
+    # Logger.debug("record Fetched Failed and retry.")
   end
 end

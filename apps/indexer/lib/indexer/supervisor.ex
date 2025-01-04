@@ -19,6 +19,7 @@ defmodule Indexer.Supervisor do
   }
 
   alias Indexer.Block.Catchup, as: BlockCatchup
+  alias Indexer.Block.QitmeerCatchup, as: BlockQitmeerCatchup
   alias Indexer.Block.Realtime, as: BlockRealtime
   alias Indexer.Fetcher.Blackfort.Validator, as: ValidatorBlackfort
   alias Indexer.Fetcher.CoinBalance.Catchup, as: CoinBalanceCatchup
@@ -247,6 +248,14 @@ defmodule Indexer.Supervisor do
             [name: BlockCatchup.Supervisor]
           ]
         ),
+        # Qitmeer utxo catchup
+        {
+          BlockQitmeerCatchup.Supervisor,
+          [
+            %{block_fetcher: block_fetcher, block_interval: block_interval, memory_monitor: memory_monitor},
+            [name: BlockQitmeerCatchup.Supervisor]
+          ]
+        },
         {Withdrawal.Supervisor, [[json_rpc_named_arguments: json_rpc_named_arguments]]}
       ]
       |> List.flatten()

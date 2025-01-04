@@ -682,7 +682,14 @@
         "zkbob",
         "zkevm",
         "zksolc",
-        "zksync"
+        "zksync",
+	"vout",
+	"dbmax",
+	"stateroot",
+	"locktime",
+	"utxo",
+	"txsvalid",
+	"parentroot"
     ],
     "enableFiletypes": [
         "dotenv",

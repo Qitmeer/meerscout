@@ -34,8 +34,7 @@ defmodule BlockScoutWeb.Routers.ApiRouter do
   }
 
   alias BlockScoutWeb.Plug.{CheckApiV2, RateLimit}
-  alias BlockScoutWeb.Routers.AccountRouter
-
+  alias BlockScoutWeb.Routers.{AccountRouter, QitmeerRouter}
   @max_query_string_length 5_000
 
   forward("/v2/smart-contracts", SmartContractsApiV2Router)
@@ -119,6 +118,9 @@ defmodule BlockScoutWeb.Routers.ApiRouter do
 
   scope "/v2", as: :api_v2 do
     pipe_through(:api_v2)
+
+    # inject qitmeer routes
+    forward("/qitmeer", QitmeerRouter)
 
     scope "/search" do
       get("/", V2.SearchController, :search)
