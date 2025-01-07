@@ -67,6 +67,8 @@ defmodule BlockScoutWeb.API.V2.QitmeerView do
       "tx_time" => tx.tx_time,
       "size" => tx.size,
       "tx_index" => tx.tx_index,
+      "index" => tx.index,
+      "vin" => tx.vin,
       "to_address" => tx.to_address,
       "spent_tx_hash" => tx.spent_tx_hash,
       "amount" => tx.amount
