@@ -1,4 +1,4 @@
-name: Publish Docker image on every push to master branch
+name: Publish Docker image for qitmeer push to master branch
 
 on:
   push:
@@ -25,6 +25,9 @@ jobs:
         with:
           docker-username: ${{ secrets.DOCKER_USERNAME }}
           docker-password: ${{ secrets.DOCKER_PASSWORD }}
+          docker-remote-multi-platform: false
+          docker-arm-host: ${{ secrets.ARM_RUNNER_HOSTNAME }}
+          docker-arm-host-key: ${{ secrets.ARM_RUNNER_KEY }}
 
       - name: Build and push Docker image (indexer + API)
         uses: docker/build-push-action@v6
