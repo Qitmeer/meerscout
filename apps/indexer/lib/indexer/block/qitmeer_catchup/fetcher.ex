@@ -36,7 +36,7 @@ defmodule Indexer.Block.QitmeerCatchup.Fetcher do
     case fetch_min_max() do
       %{min: nil, max: nil} ->
         min = 0
-        max_value = 1000
+        max_value = 200
         range = min..max_value
         Logger.info(fn -> "init Qitmeer Blocks Fetching range #{inspect(range)}" end, fetcher: :block_catchup)
         :timer.tc(fn -> qng_fetch_and_import_range(block_fetcher, range, true) end)
@@ -44,7 +44,7 @@ defmodule Indexer.Block.QitmeerCatchup.Fetcher do
       %{min: _min, max: dbmax} ->
         min = dbmax + 1
 
-        max_value = min + 1000
+        max_value = min + 200
 
         range = min..max_value
         Logger.info(fn -> "Qitmeer Blocks Fetching range #{inspect(range)}" end, fetcher: :block_catchup)
