@@ -33,13 +33,10 @@ jobs:
           context: .
           file: ./docker/Dockerfile
           push: true
-          cache-from: type=registry,ref=blockscout/blockscout:buildcache
-          cache-to: type=registry,ref=blockscout/blockscout:buildcache,mode=max
-          tags: blockscout/blockscout:master, blockscout/blockscout:${{ env.RELEASE_VERSION }}.commit.${{ env.SHORT_SHA }}
+          cache-from: type=registry,ref=qng395/blockscout:buildcache
+          cache-to: type=registry,ref=qng395/blockscout:buildcache,mode=max
+          tags: qng395/blockscout:master, qng395/blockscout:${{ env.RELEASE_VERSION }}.commit.${{ env.SHORT_SHA }}
           labels: ${{ steps.setup.outputs.docker-labels }}
-          platforms: |
-            linux/amd64
-            linux/arm64/v8
           build-args: |
             DECODE_NOT_A_CONTRACT_CALLS=false
             MIXPANEL_URL=
