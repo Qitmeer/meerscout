@@ -67,13 +67,11 @@ defmodule Indexer.Block.QitmeerFetcher do
   end
 
   defp process_vin(vin, tx_data) do
-    case Map.fetch(vin, :txid) do
+    case Map.fetch(vin, "txid") do
       {:ok, txid} ->
-        # 设置 txid 的花费状态
         qitmeer_tx_update_status(txid, vin["vout"], tx_data["txid"])
         "#{txid}:#{vin["vout"]}"
 
-      # coinbase 交易
       :error ->
         "coinbase:#{vin["coinbase"]}"
     end

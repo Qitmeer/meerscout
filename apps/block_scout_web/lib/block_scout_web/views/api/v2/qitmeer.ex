@@ -39,7 +39,8 @@ defmodule BlockScoutWeb.API.V2.QitmeerView do
       "txs_valid" => block.txs_valid,
       "nonce" => block.nonce,
       "confirms" => block.confirms,
-      "weight" => block.weight
+      "weight" => block.weight,
+      "coinbase" => block.coinbase
     }
   end
 
