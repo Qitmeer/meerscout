@@ -16,7 +16,11 @@ jobs:
     name: Push Docker image to Docker Hub
     runs-on: ubuntu-latest
     env:
+<<<<<<< HEAD
       RELEASE_VERSION: 7.0.0
+=======
+      RELEASE_VERSION: 6.10.1
+>>>>>>> 9658ec5a1 (feat: Adds support for NeonVM linked Solana transactions (#11667) (#11736))
     steps:
       - uses: actions/checkout@v4
       - name: Setup repo

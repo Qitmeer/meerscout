@@ -730,13 +730,14 @@
         "zkevm",
         "zksolc",
         "zksync",
-	"vout",
-	"dbmax",
-	"stateroot",
-	"locktime",
-	"utxo",
-	"txsvalid",
-	"parentroot"
+        "vout",
+        "dbmax",
+        "stateroot",
+        "locktime",
+        "utxo",
+        "txsvalid",
+        "parentroot",
+        "solana"
     ],
     "enableFiletypes": [
         "dotenv",
