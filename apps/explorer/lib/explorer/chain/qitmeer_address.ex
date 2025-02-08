@@ -78,8 +78,6 @@ defmodule Explorer.Chain.QitmeerAddress do
           spent: 0
         }
 
-        IO.inspect(attrs)
-
         %__MODULE__{}
         |> changeset(attrs)
         |> Repo.insert!()
