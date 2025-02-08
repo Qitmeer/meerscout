@@ -57,12 +57,12 @@ defmodule Explorer.Chain.QitmeerBlock do
           confirms: non_neg_integer()
         }
 
-  @primary_key {:hash, :string, autogenerate: false}
+  @primary_key {:block_order, :integer, autogenerate: false}
   schema "qitmeer_blocks" do
     field(:difficulty, :decimal)
     field(:miner_hash, :string)
     field(:nonce, Hash.Nonce)
-    field(:block_order, :integer)
+    field(:hash, :string)
     field(:height, :integer)
     field(:weight, :integer)
     field(:timestamp, :utc_datetime_usec)
@@ -81,22 +81,32 @@ defmodule Explorer.Chain.QitmeerBlock do
     block
     |> cast(attrs, @required_attrs ++ @optional_attrs)
     |> validate_required(@required_attrs)
-    |> unique_constraint(:hash, name: :qitmeer_blocks_pkey)
+    |> unique_constraint(:block_order, name: :qitmeer_blocks_pkey)
   end
 
   def number_only_changeset(%__MODULE__{} = block, attrs) do
     block
     |> cast(attrs, @required_attrs ++ @optional_attrs)
     |> validate_required([:number])
-    |> unique_constraint(:hash, name: :qitmeer_blocks_pkey)
+    |> unique_constraint(:block_order, name: :qitmeer_blocks_pkey)
   end
 
   def block_filter(query), do: where(query, [qitmeer_block], qitmeer_block.block_order >= 0)
 
   def insert_block(attrs) do
-    %__MODULE__{}
-    |> changeset(attrs)
-    |> Repo.insert!()
+    # IO.inspect(attrs)
+
+    case Repo.get_by(__MODULE__, block_order: attrs[:block_order]) do
+      nil ->
+        %__MODULE__{}
+        |> changeset(attrs)
+        |> Repo.insert()
+
+      existing_record ->
+        existing_record
+        |> changeset(attrs)
+        |> Repo.update()
+    end
   end
 
   def min_max_block_query do

@@ -111,13 +111,8 @@ defmodule Indexer.Block.Realtime.Fetcher do
           block_fetcher: %Block.Fetcher{} = block_fetcher,
           subscription: %Subscription{} = subscription,
           previous_number: previous_number,
-<<<<<<< HEAD
-          timer: timer,
-          last_polled_hash: last_polled_hash
-=======
           qitmeer_previous_number: qitmeer_previous_number,
           timer: timer
->>>>>>> 8bc93c2a9 (add qitmeer utxo frame)
         } = state
       )
       when is_binary(quantity) do
@@ -127,21 +122,12 @@ defmodule Indexer.Block.Realtime.Fetcher do
       Publisher.broadcast([{:last_block_number, number}], :realtime)
     end
 
-<<<<<<< HEAD
-    if hash != last_polled_hash do
-      Process.cancel_timer(timer)
-
-      # Subscriptions don't support getting all the blocks and transactions data,
-      # so we need to go back and get the full block
-      start_fetch_and_import(number, block_fetcher, previous_number)
-=======
     # Subscriptions don't support getting all the blocks and transactions data,
     # so we need to go back and get the full block
     start_fetch_and_import(number, block_fetcher, previous_number)
     start_qng_fetch_and_import(number, block_fetcher, qitmeer_previous_number)
     Process.cancel_timer(timer)
     new_timer = schedule_polling()
->>>>>>> 8bc93c2a9 (add qitmeer utxo frame)
 
       new_timer = schedule_polling()
 
@@ -176,22 +162,9 @@ defmodule Indexer.Block.Realtime.Fetcher do
         %__MODULE__{
           block_fetcher: %Block.Fetcher{json_rpc_named_arguments: json_rpc_named_arguments} = block_fetcher,
           previous_number: previous_number,
-<<<<<<< HEAD
-          last_polled_hash: last_polled_hash
-        } = state
-      ) do
-    {new_previous_number, new_last_polled_hash} =
-      case EthereumJSONRPC.fetch_block_by_tag("latest", json_rpc_named_arguments) do
-        {:ok, %Blocks{blocks_params: [%{number: number, hash: hash}]}}
-        when is_nil(previous_number) or number != previous_number ->
-=======
           qitmeer_previous_number: qitmeer_previous_number
         } = state
       ) do
-    new_previous_number =
-      case QitmeerJSONRPC.fetch_block_number_by_stateroot(json_rpc_named_arguments) do
-        {:ok, number} when is_nil(previous_number) or number != previous_number ->
->>>>>>> 8bc93c2a9 (add qitmeer utxo frame)
           number =
             if abnormal_gap?(number, previous_number) do
               new_number = max(number, previous_number)
@@ -208,21 +181,71 @@ defmodule Indexer.Block.Realtime.Fetcher do
         _ ->
           {previous_number, last_polled_hash}
       end
+    {new_previous_number, new_qitmeer_previous_number} =
+      case QitmeerJSONRPC.qng_fetch_block_stateroot(-1, json_rpc_named_arguments) do
+        {:ok, %{"Order" => block_order, "EVMHeight" => evm_height} = stateroot} ->
+          temp_new_previous_number =
+            case evm_height do
+              number when is_nil(previous_number) or number != previous_number ->
+                number =
+                  if abnormal_gap?(number, previous_number) do
+                    new_number = max(number, previous_number)
+                    start_fetch_and_import(new_number, block_fetcher, previous_number)
+                    new_number
+                  else
+                    start_fetch_and_import(number, block_fetcher, previous_number)
+                    number
+                  end
 
-    new_qitmeer_previous_number =
-      case QitmeerJSONRPC.qng_fetch_latest_block_number(json_rpc_named_arguments) do
-        {:ok, number} when is_nil(qitmeer_previous_number) or number != qitmeer_previous_number ->
-          if abnormal_gap?(number, qitmeer_previous_number) do
-            new_number = max(number, qitmeer_previous_number)
-            start_qng_fetch_and_import(new_number, block_fetcher, qitmeer_previous_number)
-            new_number
-          else
-            start_qng_fetch_and_import(number, block_fetcher, qitmeer_previous_number)
-            number
+                fetch_validators_async()
+                number
+
+              _ ->
+                previous_number
+            end
+
+          temp_new_qitmeer_previous_number =
+            case block_order do
+              number when is_nil(qitmeer_previous_number) or number > qitmeer_previous_number ->
+                if abnormal_gap?(number, qitmeer_previous_number) do
+                  new_number = max(number, qitmeer_previous_number)
+
+                  if QitmeerStateroot.check_stateroot(stateroot, qitmeer_previous_number) do
+                    start_qng_fetch_and_import(new_number, block_fetcher, qitmeer_previous_number)
+                  else
+                    reorg_start = number - Application.get_env(:indexer, __MODULE__)[:max_gap] || @default_max_gap
+                    reorg_start = max(reorg_start, 0)
+                    start_qng_fetch_and_import(new_number, block_fetcher, reorg_start)
+                  end
+>>>>>>> ddb16db24 (add stateroot check)
+
+                  new_number
+                else
+                  start_qng_fetch_and_import(number, block_fetcher, qitmeer_previous_number)
+                  number
+                end
+
+              _ ->
+                qitmeer_previous_number
+            end
+
+          case block_order do
+            number when is_nil(qitmeer_previous_number) or number <= qitmeer_previous_number ->
+              reorg_start = number - Application.get_env(:indexer, __MODULE__)[:max_gap] || @default_max_gap
+              reorg_start = max(reorg_start, 0)
+              new_number = max(number, reorg_start)
+              start_qng_fetch_and_import(new_number, block_fetcher, reorg_start)
+              number
+
+            _ ->
+              qitmeer_previous_number
           end
 
-        _ ->
-          qitmeer_previous_number
+          {temp_new_previous_number, temp_new_qitmeer_previous_number}
+
+        other ->
+          IO.puts("Error fetching stateroot: #{inspect(other)}")
+          {previous_number, qitmeer_previous_number}
       end
 
     timer = schedule_polling()
@@ -231,13 +254,8 @@ defmodule Indexer.Block.Realtime.Fetcher do
      %{
        state
        | previous_number: new_previous_number,
-<<<<<<< HEAD
-         timer: timer,
-         last_polled_hash: new_last_polled_hash
-=======
          qitmeer_previous_number: new_qitmeer_previous_number,
          timer: timer
->>>>>>> 8bc93c2a9 (add qitmeer utxo frame)
      }}
   end
 

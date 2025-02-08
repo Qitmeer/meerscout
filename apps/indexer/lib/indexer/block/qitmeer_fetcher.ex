@@ -8,6 +8,7 @@ defmodule Indexer.Block.QitmeerFetcher do
   require Logger
 
   import Explorer.Chain.QitmeerBlock, only: [insert_block: 1]
+  import Explorer.Chain.QitmeerStateRoot, only: [insert_stateroot: 1]
   import Explorer.Chain.QitmeerTransaction, only: [insert_tx: 1, qitmeer_tx_update_status: 3]
   alias EthereumJSONRPC.QitmeerBlocks
 
@@ -37,6 +38,12 @@ defmodule Indexer.Block.QitmeerFetcher do
     out_index = hd(coinbase["vout"])
     script = out_index["scriptPubKey"]
 
+    amount =
+      case Map.fetch(out_index, "amount") do
+        {:ok, _} -> out_index["amount"]
+        :error -> 0
+      end
+
     %{
       block_order: block_data["order"],
       height: block_data["height"],
@@ -50,7 +57,7 @@ defmodule Indexer.Block.QitmeerFetcher do
       pow_name: block_data["pow"] |> Map.get("pow_name"),
       difficulty: block_data["difficulty"],
       txns: length(block_data["transactions"]),
-      coinbase: out_index["amount"],
+      coinbase: amount,
       confirms: block_data["confirmations"],
       insert_catchup: insert_catchup
     }
@@ -80,6 +87,12 @@ defmodule Indexer.Block.QitmeerFetcher do
   defp convert_to_qitmeer_transaction_out(out, index, tx_index, tx_data, block_order, block_hash) do
     script = out["scriptPubKey"]
 
+    amount =
+      case Map.fetch(out, "amount") do
+        {:ok, _} -> out["amount"]
+        :error -> 0
+      end
+
     case Map.fetch(script, "addresses") do
       {:ok, _} ->
         addr = hd(script["addresses"])
@@ -97,7 +110,7 @@ defmodule Indexer.Block.QitmeerFetcher do
           hash: tx_data["txid"],
           lock_time: tx_data["locktime"],
           to_address: addr,
-          amount: out["amount"],
+          amount: amount,
           fee: 0,
           tx_time: tx_data["timestamp"],
           vin: vins,
@@ -139,6 +152,23 @@ defmodule Indexer.Block.QitmeerFetcher do
     |> Enum.map(&convert_to_qitmeer_block_transaction/1)
   end
 
+  defp save_stateroot(stateroot) do
+    if not is_nil(stateroot["Order"]) do
+      insert_stateroot(%{
+        height: stateroot["Height"],
+        evm_height: stateroot["EVMHeight"],
+        hash: stateroot["Hash"],
+        stateroot: stateroot["StateRoot"],
+        evm_stateroot: stateroot["EVMStateRoot"],
+        evm_head: stateroot["EVMHead"],
+        block_order: stateroot["Order"],
+        valid: stateroot["Valid"]
+      })
+    end
+
+    :ok
+  end
+
   def qng_fetch_and_import_range(
         %{
           json_rpc_named_arguments: json_rpc_named_arguments
@@ -146,6 +176,16 @@ defmodule Indexer.Block.QitmeerFetcher do
         range,
         insert_catchup
       ) do
+    if not insert_catchup do
+      case QitmeerJSONRPC.qng_fetch_block_stateroot(Enum.at(range, -1), json_rpc_named_arguments) do
+        {:ok, %{"Order" => _o} = stateroot} ->
+          save_stateroot(stateroot)
+
+        {:error, _} ->
+          IO.puts("Error fetching stateroot (range): #{inspect(range)}")
+      end
+    end
+
     {_, fetched_blocks} =
       :timer.tc(fn -> QitmeerJSONRPC.qng_fetch_blocks_by_range(range, json_rpc_named_arguments) end)
 
