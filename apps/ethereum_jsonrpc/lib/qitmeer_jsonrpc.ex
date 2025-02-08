@@ -23,21 +23,21 @@ defmodule QitmeerJSONRPC do
     |> qng_fetch_blocks_by_params(&ByNumber.request/1, json_rpc_named_arguments)
   end
 
-  def qng_fetch_block_stateroot(json_rpc_named_arguments) do
-    %{id: 1}
+  def qng_fetch_block_stateroot(order, json_rpc_named_arguments) do
+    %{id: 1, order: order}
     |> StateRoot.request()
     |> json_rpc(json_rpc_named_arguments)
   end
 
   def fetch_block_number_by_stateroot(json_rpc_named_arguments) do
     json_rpc_named_arguments
-    |> qng_fetch_block_stateroot()
+    |> qng_fetch_block_stateroot(-1)
     |> StateRoot.number_from_result()
   end
 
   def qng_fetch_latest_block_number(json_rpc_named_arguments) do
     json_rpc_named_arguments
-    |> qng_fetch_block_stateroot()
+    |> qng_fetch_block_stateroot(-1)
     |> StateRoot.order_from_result()
   end
 
