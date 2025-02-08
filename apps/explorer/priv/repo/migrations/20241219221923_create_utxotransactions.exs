@@ -31,6 +31,6 @@ defmodule Explorer.Repo.Migrations.CreateQitmeerTransactions do
       # denormalized from `blocks.number` to improve `Explorer.Chain.recent_collated_transactions/0` performance
     end
 
-    create(unique_index(:qitmeer_transactions, [:hash, :index]))
+    create(unique_index(:qitmeer_transactions, [:hash, :index], name: :unique_hash_index))
   end
 end

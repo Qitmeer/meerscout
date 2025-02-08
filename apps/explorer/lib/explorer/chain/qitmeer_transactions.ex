@@ -9,6 +9,7 @@ defmodule Explorer.Chain.QitmeerTransaction do
   import Explorer.Chain.QitmeerAddress, only: [qitmeer_address_update: 2]
   alias Ecto.Changeset
 
+  alias Explorer.Chain.QitmeerLock
   alias Explorer.Chain.Transaction
 
   @optional_attrs ~w(block_hash block_order tx_index lock_time spent_tx_hash tx_time status fee)a
@@ -76,6 +77,7 @@ defmodule Explorer.Chain.QitmeerTransaction do
     transaction
     |> cast(attrs, attrs_to_cast)
     |> validate_required(@required_attrs)
+    |> unique_constraint(:hash, name: :unique_hash_index)
   end
 
   def not_pending_transactions(query) do
@@ -83,11 +85,23 @@ defmodule Explorer.Chain.QitmeerTransaction do
   end
 
   def insert_tx(%{hash: _hash} = attrs) do
-    qitmeer_address_update(attrs.to_address, attrs.amount)
+    lock_name = :tx_mutex
 
-    %__MODULE__{}
-    |> changeset(attrs)
-    |> Repo.insert!()
+    case QitmeerLock.acquire_lock(lock_name) do
+      :ok ->
+        try do
+          qitmeer_address_update(attrs.to_address, attrs.amount)
+
+          %__MODULE__{}
+          |> changeset(attrs)
+          |> Repo.insert!()
+        after
+          QitmeerLock.release_lock(lock_name)
+        end
+
+      {:error, reason} ->
+        IO.puts(reason)
+    end
   end
 
   def insert_tx(%{:error => err}) do

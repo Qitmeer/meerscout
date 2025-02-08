@@ -131,40 +131,70 @@ defmodule Indexer.Block.Realtime.Fetcher do
           qitmeer_previous_number: qitmeer_previous_number
         } = state
       ) do
-    new_previous_number =
-      case QitmeerJSONRPC.fetch_block_number_by_stateroot(json_rpc_named_arguments) do
-        {:ok, number} when is_nil(previous_number) or number != previous_number ->
-          number =
-            if abnormal_gap?(number, previous_number) do
-              new_number = max(number, previous_number)
-              start_fetch_and_import(new_number, block_fetcher, previous_number)
-              new_number
-            else
-              start_fetch_and_import(number, block_fetcher, previous_number)
-              number
+    {new_previous_number, new_qitmeer_previous_number} =
+      case QitmeerJSONRPC.qng_fetch_block_stateroot(-1, json_rpc_named_arguments) do
+        {:ok, %{"Order" => block_order, "EVMHeight" => evm_height} = stateroot} ->
+          temp_new_previous_number =
+            case evm_height do
+              number when is_nil(previous_number) or number != previous_number ->
+                number =
+                  if abnormal_gap?(number, previous_number) do
+                    new_number = max(number, previous_number)
+                    start_fetch_and_import(new_number, block_fetcher, previous_number)
+                    new_number
+                  else
+                    start_fetch_and_import(number, block_fetcher, previous_number)
+                    number
+                  end
+
+                fetch_validators_async()
+                number
+
+              _ ->
+                previous_number
             end
 
-          fetch_validators_async()
-          number
+          temp_new_qitmeer_previous_number =
+            case block_order do
+              number when is_nil(qitmeer_previous_number) or number > qitmeer_previous_number ->
+                if abnormal_gap?(number, qitmeer_previous_number) do
+                  new_number = max(number, qitmeer_previous_number)
 
-        _ ->
-          previous_number
-      end
+                  if QitmeerStateroot.check_stateroot(stateroot, qitmeer_previous_number) do
+                    start_qng_fetch_and_import(new_number, block_fetcher, qitmeer_previous_number)
+                  else
+                    reorg_start = number - Application.get_env(:indexer, __MODULE__)[:max_gap] || @default_max_gap
+                    reorg_start = max(reorg_start, 0)
+                    start_qng_fetch_and_import(new_number, block_fetcher, reorg_start)
+                  end
 
-    new_qitmeer_previous_number =
-      case QitmeerJSONRPC.qng_fetch_latest_block_number(json_rpc_named_arguments) do
-        {:ok, number} when is_nil(qitmeer_previous_number) or number != qitmeer_previous_number ->
-          if abnormal_gap?(number, qitmeer_previous_number) do
-            new_number = max(number, qitmeer_previous_number)
-            start_qng_fetch_and_import(new_number, block_fetcher, qitmeer_previous_number)
-            new_number
-          else
-            start_qng_fetch_and_import(number, block_fetcher, qitmeer_previous_number)
-            number
+                  new_number
+                else
+                  start_qng_fetch_and_import(number, block_fetcher, qitmeer_previous_number)
+                  number
+                end
+
+              _ ->
+                qitmeer_previous_number
+            end
+
+          case block_order do
+            number when is_nil(qitmeer_previous_number) or number <= qitmeer_previous_number ->
+              reorg_start = number - Application.get_env(:indexer, __MODULE__)[:max_gap] || @default_max_gap
+              reorg_start = max(reorg_start, 0)
+              new_number = max(number, reorg_start)
+              start_qng_fetch_and_import(new_number, block_fetcher, reorg_start)
+              number
+
+            _ ->
+              qitmeer_previous_number
           end
 
-        _ ->
-          qitmeer_previous_number
+          {temp_new_previous_number, temp_new_qitmeer_previous_number}
+
+        other ->
+          IO.puts("Error fetching stateroot: #{inspect(other)}")
+          {previous_number, qitmeer_previous_number}
       end
 
     timer = schedule_polling()
