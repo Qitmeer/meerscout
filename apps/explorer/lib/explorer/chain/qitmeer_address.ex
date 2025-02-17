@@ -66,7 +66,8 @@ defmodule Explorer.Chain.QitmeerAddress do
   end
 
   def qitmeer_address_update(address, amount) do
-    addr = Repo.one(from(u in __MODULE__, where: u.address == ^address))
+    addr = Repo.get_by(__MODULE__, address: address)
+    # IO.inspect(addr)
 
     case addr do
       nil ->
