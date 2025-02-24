@@ -22,7 +22,7 @@ Blockscout is an open-source alternative to centralized, closed source block exp
 
 ## Supported Projects
 
-Blockscout currently supports several hundred chains and rollups throughout the greater blockchain ecosystem. Ethereum, Cosmos, Polkadot, Avalanche, Near and many others include Blockscout integrations. [A comprehensive list is available here](https://docs.blockscout.com/about/projects). If your project is not listed, please submit a PR or [contact the team in Discord](https://discord.com/invite/blockscout).
+Blockscout currently supports several hundred chains and rollups throughout the greater blockchain ecosystem. Ethereum, Cosmos, Polkadot, Avalanche, Near and many others include Blockscout integrations. A comprehensive list is available at [chains.blockscout.com](https://chains.blockscout.com). If your project is not listed, contact the team in [Discord](https://discord.com/invite/blockscout).
 
 ## Getting Started
 
@@ -35,16 +35,6 @@ See the [project documentation](https://docs.blockscout.com/) for instructions:
 - [Ansible deployment](https://docs.blockscout.com/for-developers/ansible-deployment)
 - [ENV variables](https://docs.blockscout.com/setup/env-variables)
 - [Configuration options](https://docs.blockscout.com/for-developers/configuration-options)
-
-- Deploy Meer EVM Explorer
- 
-  - `./docker-compose/proxy/default.conf.template` replace allow origin http://localhost to your ip or domain
-  - `./docker-compose/envs/common-blockscout-meer.yml` replace the `meernode` to you qng node evm rpc, replace the `CHAIN_ID`
-  
-  - `./docker-compose/envs/common-frontend-meer.env` replace the `meernode` to you qng node evm rpc, replace `localhost` to your domain or ip
-```bash
-# cd docker-compose && docker-compose -f docker-compose-meer.yml up -d
-```
 
 ## Acknowledgements
 

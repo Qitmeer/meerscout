@@ -559,7 +559,7 @@ defmodule Explorer.Chain.Transaction do
       iex> changeset.valid?
       true
 
-  A collated transaction MUST have an `index` so its position in the `block` is known and the `cumulative_gas_used` ane
+  A collated transaction MUST have an `index` so its position in the `block` is known and the `cumulative_gas_used` and
   `gas_used` to know its fees.
 
   Post-Byzantium, the status must be present when a block is collated.
@@ -1983,9 +1983,7 @@ defmodule Explorer.Chain.Transaction do
     Repo.replica().aggregate(
       from(
         t in Transaction,
-        inner_join: b in Block,
-        on: b.number == t.block_number and b.consensus == true,
-        where: t.block_number >= ^from and t.block_number <= ^to
+        where: t.block_number >= ^from and t.block_number <= ^to and t.block_consensus == true
       ),
       :count,
       timeout: :infinity

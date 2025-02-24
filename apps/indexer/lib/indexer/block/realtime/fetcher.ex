@@ -32,7 +32,7 @@ defmodule Indexer.Block.Realtime.Fetcher do
 
   import Indexer.Block.QitmeerFetcher, only: [qng_fetch_and_import_range: 3]
   alias Ecto.Changeset
-  alias EthereumJSONRPC.Subscription
+  alias EthereumJSONRPC.{Blocks, Subscription}
   alias Explorer.Chain
   alias Explorer.Chain.Events.Publisher
   alias Explorer.Counters.AverageBlockTime
@@ -53,8 +53,9 @@ defmodule Indexer.Block.Realtime.Fetcher do
   defstruct block_fetcher: nil,
             subscription: nil,
             previous_number: nil,
-            qitmeer_previous_number: nil,
-            timer: nil
+            timer: nil,
+            last_polled_hash: nil,
+            qitmeer_previous_number: nil
 
   @type t :: %__MODULE__{
           block_fetcher: %Block.Fetcher{
@@ -66,8 +67,9 @@ defmodule Indexer.Block.Realtime.Fetcher do
           },
           subscription: Subscription.t(),
           previous_number: pos_integer() | nil,
-          qitmeer_previous_number: pos_integer() | nil,
-          timer: reference()
+          timer: reference(),
+          last_polled_hash: binary() | nil,
+          qitmeer_previous_number: pos_integer() | nil
         }
 
   def start_link([arguments, gen_server_options]) do
@@ -89,15 +91,31 @@ defmodule Indexer.Block.Realtime.Fetcher do
     {:noreply, %__MODULE__{state | timer: timer} |> subscribe_to_new_heads(subscribe_named_arguments)}
   end
 
+  # This handler catches blocks appeared in websocket (if WS is enabled).
+  #
+  # It takes into account the block hash which was lastly polled by the `:poll_latest_block_number` handler: if a block with
+  # the same hash is already polled, the handler ignores it. Otherwise, the handler starts fetching and importing the block, and
+  # schedules a new polling.
+  #
+  # ## Parameters
+  # - `{subscription, {:ok, block}}` where `subscription` is an instance of WS subscription.
+  # - `state` contains service parameters, also including:
+  #   `previous_number` - the block number reported by the previous call.
+  #   `timer` - the timer to call `:poll_latest_block_number` handler next time.
+  #   `last_polled_hash` - the block hash which was polled by the `:poll_latest_block_number` handler on its previous call.
+  #
+  # ## Returns
+  # - `{:noreply, state}` tuple where the `state` is the current or updated GenServer's state.
   @impl GenServer
   def handle_info(
-        {subscription, {:ok, %{"number" => quantity}}},
+        {subscription, {:ok, %{"number" => quantity, "hash" => hash}}},
         %__MODULE__{
           block_fetcher: %Block.Fetcher{} = block_fetcher,
           subscription: %Subscription{} = subscription,
           previous_number: previous_number,
-          qitmeer_previous_number: qitmeer_previous_number,
-          timer: timer
+          timer: timer,
+          last_polled_hash: last_polled_hash,
+          qitmeer_previous_number: qitmeer_previous_number
         } = state
       )
       when is_binary(quantity) do
@@ -107,21 +125,41 @@ defmodule Indexer.Block.Realtime.Fetcher do
       Publisher.broadcast([{:last_block_number, number}], :realtime)
     end
 
-    # Subscriptions don't support getting all the blocks and transactions data,
-    # so we need to go back and get the full block
-    start_fetch_and_import(number, block_fetcher, previous_number)
-    start_qng_fetch_and_import(number, block_fetcher, qitmeer_previous_number)
-    Process.cancel_timer(timer)
-    new_timer = schedule_polling()
+    if hash != last_polled_hash do
+      Process.cancel_timer(timer)
+      # Subscriptions don't support getting all the blocks and transactions data,
+      # so we need to go back and get the full block
+      start_fetch_and_import(number, block_fetcher, previous_number)
+      start_qng_fetch_and_import(number, block_fetcher, qitmeer_previous_number)
+      Process.cancel_timer(timer)
 
-    {:noreply,
-     %{
-       state
-       | previous_number: number,
-         timer: new_timer
-     }}
+      new_timer = schedule_polling()
+
+      {:noreply,
+       %{
+         state
+         | previous_number: number,
+           timer: new_timer
+       }}
+    else
+      # The block from the websocket must be ignored if this block was already got by the `:poll_latest_block_number` handler
+      {:noreply, state}
+    end
   end
 
+  # This handler gets the latest block using RPC request to get the latest block number.
+  # It fetches the latest block number, starts its fetching and importing, and schedules the next polling iteration.
+  #
+  # ## Parameters
+  # - `:poll_latest_block_number`: The message that triggers the fetching process.
+  # - `state` contains service parameters, also including:
+  #   `previous_number` - the block number reported by the previous block number fetching.
+  #   `timer` - the timer to call this handler next time.
+  #   `last_polled_hash` - the block hash which was polled by this handler on its previous call.
+  #
+  # ## Returns
+  # - `{:noreply, state}` tuple where the `state` is the current or updated GenServer's state.
+  #   Contains updated `previous_number`, `timer`, and `last_polled_hash` values.
   @impl GenServer
   def handle_info(
         :poll_latest_block_number,
@@ -131,9 +169,9 @@ defmodule Indexer.Block.Realtime.Fetcher do
           qitmeer_previous_number: qitmeer_previous_number
         } = state
       ) do
-    {new_previous_number, new_qitmeer_previous_number} =
+    {new_previous_number, new_qitmeer_previous_number, new_last_polled_hash} =
       case QitmeerJSONRPC.qng_fetch_block_stateroot(-1, json_rpc_named_arguments) do
-        {:ok, %{"Order" => block_order, "EVMHeight" => evm_height} = stateroot} ->
+        {:ok, %{"Order" => block_order, "EVMHeight" => evm_height, "EVMStateRoot" => new_hash} = stateroot} ->
           temp_new_previous_number =
             case evm_height do
               number when is_nil(previous_number) or number != previous_number ->
@@ -190,7 +228,7 @@ defmodule Indexer.Block.Realtime.Fetcher do
               qitmeer_previous_number
           end
 
-          {temp_new_previous_number, temp_new_qitmeer_previous_number}
+          {temp_new_previous_number, temp_new_qitmeer_previous_number, new_hash}
 
         other ->
           IO.puts("Error fetching stateroot: #{inspect(other)}")
@@ -203,8 +241,9 @@ defmodule Indexer.Block.Realtime.Fetcher do
      %{
        state
        | previous_number: new_previous_number,
-         qitmeer_previous_number: new_qitmeer_previous_number,
-         timer: timer
+         timer: timer,
+         last_polled_hash: new_last_polled_hash,
+         qitmeer_previous_number: new_qitmeer_previous_number
      }}
   end
 
@@ -221,12 +260,16 @@ defmodule Indexer.Block.Realtime.Fetcher do
   case @chain_type do
     :stability ->
       defp fetch_validators_async do
-        GenServer.cast(Indexer.Fetcher.Stability.Validator, :update_validators_list)
+        alias Indexer.Fetcher.Stability.Validator, as: StabilityValidator
+
+        StabilityValidator.trigger_update_validators_list()
       end
 
     :blackfort ->
       defp fetch_validators_async do
-        GenServer.cast(Indexer.Fetcher.Blackfort.Validator, :update_validators_list)
+        alias Indexer.Fetcher.Blackfort.Validator, as: BlackfortValidator
+
+        BlackfortValidator.trigger_update_validators_list()
       end
 
     _ ->
@@ -259,9 +302,15 @@ defmodule Indexer.Block.Realtime.Fetcher do
 
   defp schedule_polling do
     polling_period =
-      case AverageBlockTime.average_block_time() do
-        {:error, :disabled} -> 2_000
-        block_time -> min(round(Duration.to_milliseconds(block_time) / 2), 30_000)
+      case Application.get_env(:indexer, __MODULE__)[:polling_period] do
+        nil ->
+          case AverageBlockTime.average_block_time() do
+            {:error, :disabled} -> 2_000
+            block_time -> min(round(Duration.to_milliseconds(block_time) / 2), 30_000)
+          end
+
+        period ->
+          period
       end
 
     safe_polling_period = max(polling_period, @minimum_safe_polling_period)
@@ -362,10 +411,12 @@ defmodule Indexer.Block.Realtime.Fetcher do
 
   case @chain_type do
     :optimism ->
-      # Removes all rows from `op_transaction_batches` and `op_withdrawals` tables
-      # previously written starting from the reorg block number
+      # Removes all rows from `op_transaction_batches`, `op_withdrawals`,
+      # and `op_eip1559_config_updates` tables previously written starting
+      # from the reorg block number
       defp remove_assets_by_number(reorg_block) do
-        # credo:disable-for-lines:2 Credo.Check.Design.AliasUsage
+        # credo:disable-for-lines:3 Credo.Check.Design.AliasUsage
+        Indexer.Fetcher.Optimism.EIP1559ConfigUpdate.handle_realtime_l2_reorg(reorg_block)
         Indexer.Fetcher.Optimism.TransactionBatch.handle_l2_reorg(reorg_block)
         Indexer.Fetcher.Optimism.Withdrawal.remove(reorg_block)
       end
