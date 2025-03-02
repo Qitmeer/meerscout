@@ -75,3 +75,6 @@ tasks_in_progress
 /dets
 
 /temp
+
+.env.test.sh
+start-test.sh
