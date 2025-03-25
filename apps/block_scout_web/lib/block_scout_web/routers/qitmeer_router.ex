@@ -5,6 +5,7 @@ defmodule BlockScoutWeb.Routers.QitmeerRouter do
   use BlockScoutWeb, :router
 
   alias BlockScoutWeb.API.V2.QitmeerController
+  alias BlockScoutWeb.API.V2.QitmeerV2Controller
 
   # /api/v2/qitmeer/
 
@@ -20,7 +21,17 @@ defmodule BlockScoutWeb.Routers.QitmeerRouter do
   end
 
   scope "/addresses" do
-    get("/:address_hash_param", QitmeerController, :qitmeer_address)
-    get("/:address_hash_param/transactions", QitmeerController, :qitmeer_address_transactions)
+    get("/:address", QitmeerV2Controller, :utxo_address_info)
+    get("/:address/transactions", QitmeerV2Controller, :utxo_transactions)
+  end
+
+  scope "/network" do
+    get("/status", QitmeerV2Controller, :network_status)
+    get("/hashrate", QitmeerV2Controller, :hashrate_stats)
+    get("/nodes", QitmeerV2Controller, :node_status)
+  end
+
+  scope "/accounts" do
+    get("/", QitmeerV2Controller, :accounts_list)
   end
 end
