@@ -13,6 +13,7 @@ defmodule BlockScoutWeb.Routers.ApiRouter do
   Router for API
   """
   use BlockScoutWeb, :router
+  use BlockScoutWeb.Routers.ChainTypeScope
 
   use Utils.CompileTimeEnvHelper,
     chain_type: [:explorer, :chain_type],
@@ -22,8 +23,6 @@ defmodule BlockScoutWeb.Routers.ApiRouter do
     graphql_token_limit: [:block_scout_web, [Api.GraphQL, :token_limit]],
     reading_enabled: [:block_scout_web, [__MODULE__, :reading_enabled]],
     writing_enabled: [:block_scout_web, [__MODULE__, :writing_enabled]]
-
-  alias BlockScoutWeb.AddressTransactionController
 
   alias BlockScoutWeb.Routers.{
     AddressBadgesApiV2Router,
@@ -56,6 +55,7 @@ defmodule BlockScoutWeb.Routers.ApiRouter do
 
     plug(BlockScoutWeb.Plug.Logger, application: :api)
     plug(:accepts, ["json"])
+    plug(:fetch_cookies)
   end
 
   pipeline :api_v2 do
@@ -101,6 +101,7 @@ defmodule BlockScoutWeb.Routers.ApiRouter do
     plug(BlockScoutWeb.Plug.Logger, application: :api)
     plug(:accepts, ["json"])
     plug(RateLimit, graphql?: true)
+    plug(BlockScoutWeb.Plug.GraphQLSchemaIntrospection)
   end
 
   alias BlockScoutWeb.API.V2
@@ -171,7 +172,7 @@ defmodule BlockScoutWeb.Routers.ApiRouter do
       get("/:transaction_hash_param/state-changes", V2.TransactionController, :state_changes)
       get("/:transaction_hash_param/summary", V2.TransactionController, :summary)
 
-      if @chain_type == :neon do
+      chain_scope :neon do
         get("/:transaction_hash_param/external-transactions", V2.TransactionController, :external_transactions)
       end
 
@@ -222,9 +223,13 @@ defmodule BlockScoutWeb.Routers.ApiRouter do
       get("/:address_hash_param/token-balances", V2.AddressController, :token_balances)
       get("/:address_hash_param/tokens", V2.AddressController, :tokens)
       get("/:address_hash_param/transactions", V2.AddressController, :transactions)
+      get("/:address_hash_param/transactions/csv", V2.CsvExportController, :transactions_csv)
       get("/:address_hash_param/token-transfers", V2.AddressController, :token_transfers)
+      get("/:address_hash_param/token-transfers/csv", V2.CsvExportController, :token_transfers_csv)
       get("/:address_hash_param/internal-transactions", V2.AddressController, :internal_transactions)
+      get("/:address_hash_param/internal-transactions/csv", V2.CsvExportController, :internal_transactions_csv)
       get("/:address_hash_param/logs", V2.AddressController, :logs)
+      get("/:address_hash_param/logs/csv", V2.CsvExportController, :logs_csv)
       get("/:address_hash_param/blocks-validated", V2.AddressController, :blocks_validated)
       get("/:address_hash_param/coin-balance-history", V2.AddressController, :coin_balance_history)
       get("/:address_hash_param/coin-balance-history-by-day", V2.AddressController, :coin_balance_history_by_day)
@@ -234,6 +239,7 @@ defmodule BlockScoutWeb.Routers.ApiRouter do
 
       if @chain_type == :celo do
         get("/:address_hash_param/election-rewards", V2.AddressController, :celo_election_rewards)
+        get("/:address_hash_param/election-rewards/csv", V2.CsvExportController, :celo_election_rewards_csv)
       end
     end
 
@@ -295,7 +301,7 @@ defmodule BlockScoutWeb.Routers.ApiRouter do
     end
 
     scope "/polygon-edge" do
-      if @chain_type == :polygon_edge do
+      chain_scope :polygon_edge do
         get("/deposits", V2.PolygonEdgeController, :deposits)
         get("/deposits/count", V2.PolygonEdgeController, :deposits_count)
         get("/withdrawals", V2.PolygonEdgeController, :withdrawals)
@@ -316,7 +322,7 @@ defmodule BlockScoutWeb.Routers.ApiRouter do
     end
 
     scope "/shibarium" do
-      if @chain_type == :shibarium do
+      chain_scope :shibarium do
         get("/deposits", V2.ShibariumController, :deposits)
         get("/deposits/count", V2.ShibariumController, :deposits_count)
         get("/withdrawals", V2.ShibariumController, :withdrawals)
@@ -360,20 +366,6 @@ defmodule BlockScoutWeb.Routers.ApiRouter do
         end
       end
 
-      # todo: this endpoint should be removed in 7.1.0 release
-      scope "/noves-fi" do
-        get("/transactions/:transaction_hash_param", V2.Proxy.NovesFiController, :transaction)
-
-        get("/addresses/:address_hash_param/transactions", V2.Proxy.NovesFiController, :address_transactions)
-
-        get("/transaction-descriptions", V2.Proxy.NovesFiController, :describe_transactions)
-      end
-
-      # todo: this endpoint should be removed in 7.1.0 release
-      scope "/xname" do
-        get("/addresses/:address_hash_param", V2.Proxy.XnameController, :address)
-      end
-
       scope "/account-abstraction" do
         get("/operations/:operation_hash_param", V2.Proxy.AccountAbstractionController, :operation)
         get("/operations/:operation_hash_param/summary", V2.Proxy.AccountAbstractionController, :summary)
@@ -402,21 +394,25 @@ defmodule BlockScoutWeb.Routers.ApiRouter do
     end
 
     scope "/validators" do
-      case @chain_type do
-        :stability ->
-          scope "/stability" do
-            get("/", V2.ValidatorController, :stability_validators_list)
-            get("/counters", V2.ValidatorController, :stability_validators_counters)
-          end
+      if @chain_type == :zilliqa do
+        scope "/zilliqa" do
+          get("/", V2.ValidatorController, :zilliqa_validators_list)
+          get("/:bls_public_key", V2.ValidatorController, :zilliqa_validator)
+        end
+      end
 
-        :blackfort ->
-          scope "/blackfort" do
-            get("/", V2.ValidatorController, :blackfort_validators_list)
-            get("/counters", V2.ValidatorController, :blackfort_validators_counters)
-          end
+      chain_scope :stability do
+        scope "/stability" do
+          get("/", V2.ValidatorController, :stability_validators_list)
+          get("/counters", V2.ValidatorController, :stability_validators_counters)
+        end
+      end
 
-        _ ->
-          nil
+      chain_scope :blackfort do
+        scope "/blackfort" do
+          get("/", V2.ValidatorController, :blackfort_validators_list)
+          get("/counters", V2.ValidatorController, :blackfort_validators_counters)
+        end
       end
     end
 
@@ -490,16 +486,14 @@ defmodule BlockScoutWeb.Routers.ApiRouter do
     # leave the same endpoint in v1 in order to keep backward compatibility
     get("/search", SearchController, :search)
 
-    get("/transactions-csv", AddressTransactionController, :transactions_csv)
-
-    get("/token-transfers-csv", AddressTransactionController, :token_transfers_csv)
-
-    get("/internal-transactions-csv", AddressTransactionController, :internal_transactions_csv)
-
-    get("/logs-csv", AddressTransactionController, :logs_csv)
+    # todo: remove these old CSV export related endpoints in 7.2.0 or higher since they are moved to /api/v2/** path
+    get("/transactions-csv", V2.CsvExportController, :transactions_csv)
+    get("/token-transfers-csv", V2.CsvExportController, :token_transfers_csv)
+    get("/internal-transactions-csv", V2.CsvExportController, :internal_transactions_csv)
+    get("/logs-csv", V2.CsvExportController, :logs_csv)
 
     if @chain_type == :celo do
-      get("/celo-election-rewards-csv", AddressTransactionController, :celo_election_rewards_csv)
+      get("/celo-election-rewards-csv", V2.CsvExportController, :celo_election_rewards_csv)
     end
 
     get("/gas-price-oracle", GasPriceOracleController, :gas_price_oracle)
@@ -510,7 +504,6 @@ defmodule BlockScoutWeb.Routers.ApiRouter do
     end
 
     if @writing_enabled do
-      post("/decompiled_smart_contract", V1.DecompiledSmartContractController, :create)
       post("/verified_smart_contracts", V1.VerifiedSmartContractController, :create)
     end
 

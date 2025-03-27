@@ -15,7 +15,6 @@ defmodule Explorer.ChainTest do
     Address,
     Block,
     Data,
-    DecompiledSmartContract,
     Hash,
     InternalTransaction,
     Log,
@@ -29,14 +28,11 @@ defmodule Explorer.ChainTest do
   alias Explorer.{Chain, Etherscan}
   alias Explorer.Chain.Address.Counters
   alias Explorer.Chain.Block.Reader.General, as: BlockGeneralReader
-  alias Explorer.Chain.Cache.Block, as: BlockCache
-  alias Explorer.Chain.Cache.Transaction, as: TransactionCache
-  alias Explorer.Chain.Cache.PendingBlockOperation, as: PendingBlockOperationCache
+  alias Explorer.Chain.Cache.Counters.{BlocksCount, TransactionsCount, PendingBlockOperationCount}
   alias Explorer.Chain.InternalTransaction.Type
 
   alias Explorer.Chain.Supply.ProofOfAuthority
-  alias Explorer.Counters.AddressesWithBalanceCounter
-  alias Explorer.Counters.AddressesCounter
+  alias Explorer.Chain.Cache.Counters.AddressesCount
 
   @first_topic_hex_string "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
   @second_topic_hex_string "0x000000000000000000000000e8ddc5c7a2d2f0d7a9798459c0104fdf5e987aca"
@@ -56,6 +52,11 @@ defmodule Explorer.ChainTest do
       nonconsensus_block = insert(:block, consensus: false)
       insert(:pending_block_operation, block: nonconsensus_block, block_number: nonconsensus_block.number)
 
+      config = Application.get_env(:ethereum_jsonrpc, EthereumJSONRPC.Geth)
+      Application.put_env(:ethereum_jsonrpc, EthereumJSONRPC.Geth, Keyword.put(config, :block_traceable?, true))
+
+      on_exit(fn -> Application.put_env(:ethereum_jsonrpc, EthereumJSONRPC.Geth, config) end)
+
       :ok = Chain.remove_nonconsensus_blocks_from_pending_ops()
 
       assert Repo.get(PendingBlockOperation, block.hash)
@@ -72,27 +73,16 @@ defmodule Explorer.ChainTest do
       nonconsensus_block1 = insert(:block, consensus: false)
       insert(:pending_block_operation, block: nonconsensus_block1, block_number: nonconsensus_block1.number)
 
+      config = Application.get_env(:ethereum_jsonrpc, EthereumJSONRPC.Geth)
+      Application.put_env(:ethereum_jsonrpc, EthereumJSONRPC.Geth, Keyword.put(config, :block_traceable?, true))
+
+      on_exit(fn -> Application.put_env(:ethereum_jsonrpc, EthereumJSONRPC.Geth, config) end)
+
       :ok = Chain.remove_nonconsensus_blocks_from_pending_ops([nonconsensus_block1.hash])
 
       assert Repo.get(PendingBlockOperation, block.hash)
       assert Repo.get(PendingBlockOperation, nonconsensus_block.hash)
       assert is_nil(Repo.get(PendingBlockOperation, nonconsensus_block1.hash))
-    end
-  end
-
-  describe "count_addresses_with_balance_from_cache/0" do
-    test "returns the number of addresses with fetched_coin_balance > 0" do
-      insert(:address, fetched_coin_balance: 0)
-      insert(:address, fetched_coin_balance: 1)
-      insert(:address, fetched_coin_balance: 2)
-
-      start_supervised!(AddressesWithBalanceCounter)
-      AddressesWithBalanceCounter.consolidate()
-
-      addresses_with_balance = Counters.count_addresses_with_balance_from_cache()
-
-      assert is_integer(addresses_with_balance)
-      assert addresses_with_balance == 2
     end
   end
 
@@ -102,18 +92,18 @@ defmodule Explorer.ChainTest do
       insert(:address, fetched_coin_balance: 1)
       insert(:address, fetched_coin_balance: 2)
 
-      start_supervised!(AddressesCounter)
-      AddressesCounter.consolidate()
+      start_supervised!(AddressesCount)
+      AddressesCount.consolidate()
 
-      addresses_with_balance = Counters.address_estimated_count()
+      addresses_with_balance = AddressesCount.fetch()
 
       assert is_integer(addresses_with_balance)
       assert addresses_with_balance == 3
     end
 
     test "returns 0 on empty table" do
-      start_supervised!(AddressesCounter)
-      assert 0 == Counters.address_estimated_count()
+      start_supervised!(AddressesCount)
+      assert 0 == AddressesCount.fetch()
     end
   end
 
@@ -284,28 +274,6 @@ defmodule Explorer.ChainTest do
       [found_log] = Chain.address_to_logs(address_hash, false, topic: fourth_topic_hex_string)
 
       assert found_log.transaction.hash == transaction1.hash
-    end
-  end
-
-  describe "total_transactions_sent_by_address/1" do
-    test "increments +1 in the last nonce result" do
-      address = insert(:address)
-
-      :transaction
-      |> insert(nonce: 100, from_address: address)
-      |> with_block(insert(:block, number: 1000))
-
-      assert Counters.total_transactions_sent_by_address(address.hash) == 101
-    end
-
-    test "returns 0 when the address did not send transactions" do
-      address = insert(:address)
-
-      :transaction
-      |> insert(nonce: 100, to_address: address)
-      |> with_block(insert(:block, number: 1000))
-
-      assert Counters.total_transactions_sent_by_address(address.hash) == 0
     end
   end
 
@@ -515,20 +483,6 @@ defmodule Explorer.ChainTest do
     end
   end
 
-  describe "address_to_incoming_transaction_count/1" do
-    test "without transactions" do
-      %Address{hash: address_hash} = insert(:address)
-
-      assert Counters.address_to_incoming_transaction_count(address_hash) == 0
-    end
-
-    test "with transactions" do
-      %Transaction{to_address: to_address} = insert(:transaction)
-
-      assert Counters.address_to_incoming_transaction_count(to_address.hash) == 1
-    end
-  end
-
   describe "confirmations/1" do
     test "with block.number == block_height " do
       block = insert(:block)
@@ -638,9 +592,9 @@ defmodule Explorer.ChainTest do
 
   describe "finished_indexing_internal_transactions?/0" do
     setup do
-      Supervisor.terminate_child(Explorer.Supervisor, PendingBlockOperationCache.child_id())
-      Supervisor.restart_child(Explorer.Supervisor, PendingBlockOperationCache.child_id())
-      on_exit(fn -> Supervisor.terminate_child(Explorer.Supervisor, PendingBlockOperationCache.child_id()) end)
+      Supervisor.terminate_child(Explorer.Supervisor, PendingBlockOperationCount.child_id())
+      Supervisor.restart_child(Explorer.Supervisor, PendingBlockOperationCount.child_id())
+      on_exit(fn -> Supervisor.terminate_child(Explorer.Supervisor, PendingBlockOperationCount.child_id()) end)
     end
 
     test "finished indexing" do
@@ -805,23 +759,6 @@ defmodule Explorer.ChainTest do
       assert address_from_db.hash == address.hash
       assert address_from_db.inserted_at == address.inserted_at
     end
-
-    test "has_decompiled_code? is true if there are decompiled contracts" do
-      address = insert(:address)
-      insert(:decompiled_smart_contract, address_hash: address.hash)
-
-      {:ok, found_address} = Chain.hash_to_address(address.hash, [], true)
-
-      assert found_address.has_decompiled_code?
-    end
-
-    test "has_decompiled_code? is false if there are no decompiled contracts" do
-      address = insert(:address)
-
-      {:ok, found_address} = Chain.hash_to_address(address.hash)
-
-      refute found_address.has_decompiled_code?
-    end
   end
 
   describe "token_contract_address_from_token_name/1" do
@@ -932,11 +869,13 @@ defmodule Explorer.ChainTest do
 
   describe "indexed_ratio_blocks/0" do
     setup do
-      Supervisor.terminate_child(Explorer.Supervisor, Explorer.Chain.Cache.Block.child_id())
-      Supervisor.restart_child(Explorer.Supervisor, Explorer.Chain.Cache.Block.child_id())
+      Supervisor.terminate_child(Explorer.Supervisor, Explorer.Chain.Cache.Counters.BlocksCount.child_id())
+      Supervisor.restart_child(Explorer.Supervisor, Explorer.Chain.Cache.Counters.BlocksCount.child_id())
+
+      initial_env = Application.get_env(:indexer, :block_ranges)
 
       on_exit(fn ->
-        Application.put_env(:indexer, :first_block, 0)
+        Application.put_env(:indexer, :block_ranges, initial_env)
       end)
     end
 
@@ -945,7 +884,7 @@ defmodule Explorer.ChainTest do
         insert(:block, number: index, consensus: true)
       end
 
-      BlockCache.estimated_count()
+      BlocksCount.get()
 
       assert Decimal.compare(Chain.indexed_ratio_blocks(), Decimal.from_float(0.5)) == :eq
     end
@@ -960,20 +899,19 @@ defmodule Explorer.ChainTest do
         Process.sleep(200)
       end
 
-      BlockCache.estimated_count()
+      BlocksCount.get()
 
       assert Decimal.compare(Chain.indexed_ratio_blocks(), 1) == :eq
     end
 
     test "returns 1.0 if fully indexed blocks starting from given FIRST_BLOCK" do
-      Application.put_env(:indexer, :first_block, 5)
-
       for index <- 5..9 do
         insert(:block, number: index, consensus: true)
         Process.sleep(200)
       end
 
-      BlockCache.estimated_count()
+      BlocksCount.get()
+      Application.put_env(:indexer, :block_ranges, "5..latest")
 
       assert Decimal.compare(Chain.indexed_ratio_blocks(), 1) == :eq
     end
@@ -981,15 +919,15 @@ defmodule Explorer.ChainTest do
 
   describe "indexed_ratio_internal_transactions/0" do
     setup do
-      Supervisor.terminate_child(Explorer.Supervisor, PendingBlockOperationCache.child_id())
-      Supervisor.restart_child(Explorer.Supervisor, PendingBlockOperationCache.child_id())
+      Supervisor.terminate_child(Explorer.Supervisor, PendingBlockOperationCount.child_id())
+      Supervisor.restart_child(Explorer.Supervisor, PendingBlockOperationCount.child_id())
       configuration = Application.get_env(:indexer, Indexer.Fetcher.InternalTransaction.Supervisor)
       Application.put_env(:indexer, Indexer.Fetcher.InternalTransaction.Supervisor, disabled?: false)
 
       on_exit(fn ->
         Application.put_env(:indexer, :trace_first_block, 0)
         Application.put_env(:indexer, Indexer.Fetcher.InternalTransaction.Supervisor, configuration)
-        Supervisor.terminate_child(Explorer.Supervisor, PendingBlockOperationCache.child_id())
+        Supervisor.terminate_child(Explorer.Supervisor, PendingBlockOperationCount.child_id())
       end)
     end
 
@@ -1001,6 +939,11 @@ defmodule Explorer.ChainTest do
           insert(:pending_block_operation, block: block, block_number: block.number)
         end
       end
+
+      config = Application.get_env(:ethereum_jsonrpc, EthereumJSONRPC.Geth)
+      Application.put_env(:ethereum_jsonrpc, EthereumJSONRPC.Geth, Keyword.put(config, :block_traceable?, true))
+
+      on_exit(fn -> Application.put_env(:ethereum_jsonrpc, EthereumJSONRPC.Geth, config) end)
 
       Chain.indexed_ratio_internal_transactions()
 
@@ -2139,13 +2082,13 @@ defmodule Explorer.ChainTest do
 
   describe "transaction_estimated_count/1" do
     setup do
-      Supervisor.terminate_child(Explorer.Supervisor, Explorer.Chain.Cache.Transaction.child_id())
-      Supervisor.restart_child(Explorer.Supervisor, Explorer.Chain.Cache.Transaction.child_id())
+      Supervisor.terminate_child(Explorer.Supervisor, Explorer.Chain.Cache.Counters.TransactionsCount.child_id())
+      Supervisor.restart_child(Explorer.Supervisor, Explorer.Chain.Cache.Counters.TransactionsCount.child_id())
       :ok
     end
 
     test "returns integer" do
-      assert is_integer(TransactionCache.estimated_count())
+      assert is_integer(TransactionsCount.get())
     end
   end
 
@@ -2530,21 +2473,9 @@ defmodule Explorer.ChainTest do
         }
       ]
 
-      response = Chain.find_contract_address(address.hash, options, true)
+      response = Chain.find_contract_address(address.hash, options)
 
       assert response == {:ok, address}
-    end
-  end
-
-  describe "find_decompiled_contract_address/1" do
-    test "returns contract with decompiled contracts" do
-      address = insert(:address)
-      insert(:decompiled_smart_contract, address_hash: address.hash)
-      insert(:decompiled_smart_contract, address_hash: address.hash, decompiler_version: "2")
-
-      {:ok, address} = Chain.find_decompiled_contract_address(address.hash)
-
-      assert Enum.count(address.decompiled_smart_contracts) == 2
     end
   end
 
@@ -2797,77 +2728,6 @@ defmodule Explorer.ChainTest do
       )
 
       assert Chain.smart_contract_bytecode(created_contract_address.hash) == smart_contract_bytecode
-    end
-  end
-
-  describe "create_decompiled_smart_contract/1" do
-    test "with valid params creates decompiled smart contract" do
-      address_hash = to_string(insert(:address).hash)
-      decompiler_version = "test_decompiler"
-      decompiled_source_code = "hello world"
-
-      params = %{
-        address_hash: address_hash,
-        decompiler_version: decompiler_version,
-        decompiled_source_code: decompiled_source_code
-      }
-
-      {:ok, decompiled_smart_contract} = Chain.create_decompiled_smart_contract(params)
-
-      assert decompiled_smart_contract.decompiler_version == decompiler_version
-      assert decompiled_smart_contract.decompiled_source_code == decompiled_source_code
-      assert address_hash == to_string(decompiled_smart_contract.address_hash)
-    end
-
-    test "with invalid params can't create decompiled smart contract" do
-      params = %{code: "cat"}
-
-      {:error, _changeset} = Chain.create_decompiled_smart_contract(params)
-    end
-
-    test "updates smart contract code" do
-      inserted_decompiled_smart_contract = insert(:decompiled_smart_contract)
-      code = "code2"
-
-      {:ok, _decompiled_smart_contract} =
-        Chain.create_decompiled_smart_contract(%{
-          decompiler_version: inserted_decompiled_smart_contract.decompiler_version,
-          decompiled_source_code: code,
-          address_hash: inserted_decompiled_smart_contract.address_hash
-        })
-
-      decompiled_smart_contract =
-        Repo.one(
-          from(ds in DecompiledSmartContract,
-            where:
-              ds.address_hash == ^inserted_decompiled_smart_contract.address_hash and
-                ds.decompiler_version == ^inserted_decompiled_smart_contract.decompiler_version
-          )
-        )
-
-      assert decompiled_smart_contract.decompiled_source_code == code
-    end
-
-    test "creates two smart contracts for different decompiler versions" do
-      inserted_decompiled_smart_contract = insert(:decompiled_smart_contract)
-      code = "code2"
-      version = "2"
-
-      {:ok, _decompiled_smart_contract} =
-        Chain.create_decompiled_smart_contract(%{
-          decompiler_version: version,
-          decompiled_source_code: code,
-          address_hash: inserted_decompiled_smart_contract.address_hash
-        })
-
-      decompiled_smart_contracts =
-        Repo.all(
-          from(ds in DecompiledSmartContract,
-            where: ds.address_hash == ^inserted_decompiled_smart_contract.address_hash
-          )
-        )
-
-      assert Enum.count(decompiled_smart_contracts) == 2
     end
   end
 

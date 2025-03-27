@@ -9,6 +9,7 @@ defmodule Indexer.Block.Catchup.MissingRangesCollector do
   alias EthereumJSONRPC.Utility.RangesHelper
   alias Explorer.{Chain, Helper, Repo}
   alias Explorer.Chain.Cache.BlockNumber
+  alias Explorer.Chain.Cache.Counters.LastFetchedCounter
   alias Explorer.Utility.{MissingBlockRange, MissingRangesManipulator}
 
   @default_missing_ranges_batch_size 100_000
@@ -173,11 +174,12 @@ defmodule Indexer.Block.Catchup.MissingRangesCollector do
   end
 
   defp first_block do
-    first_block_from_config = Application.get_env(:indexer, :first_block)
+    first_block_from_config =
+      RangesHelper.get_min_block_number_from_range_string(Application.get_env(:indexer, :block_ranges))
 
     min_missing_block_number =
       "min_missing_block_number"
-      |> Chain.get_last_fetched_counter()
+      |> LastFetchedCounter.get()
       |> Decimal.to_integer()
 
     max(first_block_from_config, min_missing_block_number)
