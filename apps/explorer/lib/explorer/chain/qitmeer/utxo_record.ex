@@ -5,7 +5,9 @@ defmodule Explorer.Chain.Qitmeer.UTXORecord do
   @primary_key false
   schema "qitmeer_utxo_records" do
     field(:address, :string)
-    field(:amount, :integer)
+    field(:amount, :decimal)
+    field(:index, :integer)
+    field(:block_height, :integer)
     field(:spent, :boolean, default: false)
     field(:tx_hash, :string)
 
@@ -14,7 +16,7 @@ defmodule Explorer.Chain.Qitmeer.UTXORecord do
 
   def changeset(record, attrs) do
     record
-    |> cast(attrs, [:address, :amount, :spent, :tx_hash])
-    |> validate_required([:address, :amount, :tx_hash])
+    |> cast(attrs, [:address, :amount, :spent, :tx_hash, :index, :block_height])
+    |> validate_required([:address, :amount, :tx_hash, :index, :block_height])
   end
 end

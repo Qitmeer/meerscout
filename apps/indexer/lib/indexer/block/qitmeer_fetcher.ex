@@ -4,13 +4,16 @@ defmodule Indexer.Block.QitmeerFetcher do
   """
 
   use Spandex.Decorators
-
+  import Ecto.Query
   require Logger
 
   import Explorer.Chain.QitmeerBlock, only: [insert_block: 1]
   import Explorer.Chain.QitmeerStateRoot, only: [insert_stateroot: 1]
-  import Explorer.Chain.QitmeerTransaction, only: [insert_tx: 1, qitmeer_tx_update_status: 3]
+  import Explorer.Chain.QitmeerTransaction, only: [insert_tx: 1]
   alias EthereumJSONRPC.QitmeerBlocks
+  alias Explorer.Chain.{QitmeerBlock, QitmeerTransaction, QitmeerSupply}
+  alias Explorer.Repo
+  alias Explorer.Chain.Qitmeer.{UTXORecord, QitmeerAccount}
 
   @type t :: %__MODULE__{}
 
@@ -65,6 +68,8 @@ defmodule Indexer.Block.QitmeerFetcher do
 
   defp save_blocks_to_db(blocks) do
     Enum.each(blocks, &insert_block/1)
+
+    Enum.each(blocks, &import_supply/1)
   end
 
   def convert_and_save_to_db(block_list, insert_catchup) do
@@ -143,8 +148,9 @@ defmodule Indexer.Block.QitmeerFetcher do
     end)
   end
 
-  defp save_tx_to_db(blocks) do
-    Enum.each(blocks, &insert_tx/1)
+  defp save_tx_to_db(txs) do
+    Enum.each(txs, &insert_tx/1)
+    Enum.each(txs, &handle_utxo_records/1)
   end
 
   def convert_and_save_tx_to_db(block_list) do
@@ -167,6 +173,101 @@ defmodule Indexer.Block.QitmeerFetcher do
     end
 
     :ok
+  end
+
+  defp handle_utxo_records(attrs) do
+    # Convert amount to integer
+    amount =
+      case attrs.amount do
+        %Decimal{} = decimal -> Decimal.to_integer(decimal)
+        amount when is_integer(amount) -> amount
+        amount when is_float(amount) -> round(amount)
+        _ -> 0
+      end
+
+    case Repo.get_by(UTXORecord, tx_hash: attrs.hash, index: attrs.index) do
+      nil ->
+        # Create new UTXO record
+        %UTXORecord{}
+        |> UTXORecord.changeset(%{
+          address: attrs.to_address,
+          amount: amount,
+          tx_hash: attrs.hash,
+          index: attrs.index,
+          spent: false,
+          block_height: attrs.block_order
+        })
+        |> Repo.insert!()
+
+        # Update account balance and utxo_count
+        update_account_for_new_utxo(attrs.to_address, amount)
+
+      _existing_record ->
+        :ok
+    end
+  end
+
+  defp handle_utxo_records(_), do: :ok
+
+  def qitmeer_tx_update_status(tx_hash, index, insert_catchup) do
+    # Update transaction status
+    QitmeerTransaction.qitmeer_tx_update_status(tx_hash, index, insert_catchup)
+
+    # Update UTXO spent status if transaction is spent
+    case Repo.get_by(UTXORecord, tx_hash: tx_hash) do
+      nil ->
+        :ok
+
+      record ->
+        # Update UTXO spent status
+        record
+        |> UTXORecord.changeset(%{spent: true})
+        |> Repo.update!()
+
+        # Update account balance and tx_count
+        update_account_for_spent_utxo(record.address, record.amount)
+    end
+  end
+
+  defp update_account_for_new_utxo(address, amount) do
+    case Repo.get(QitmeerAccount, address) do
+      nil ->
+        # Create new account
+        %QitmeerAccount{}
+        |> QitmeerAccount.changeset(%{
+          address: address,
+          balance: amount,
+          tx_count: 0,
+          utxo_count: 1
+        })
+        |> Repo.insert!()
+
+      account ->
+        # Update existing account
+        account
+        |> QitmeerAccount.changeset(%{
+          balance: account.balance + amount,
+          utxo_count: account.utxo_count + 1,
+          tx_count: account.tx_count + 1
+        })
+        |> Repo.update!()
+    end
+  end
+
+  defp update_account_for_spent_utxo(address, amount) do
+    case Repo.get(QitmeerAccount, address) do
+      nil ->
+        :ok
+
+      account ->
+        # Update account balance and tx_count
+        account
+        |> QitmeerAccount.changeset(%{
+          balance: account.balance - amount,
+          tx_count: account.tx_count + 1
+        })
+        |> Repo.update!()
+    end
   end
 
   def qng_fetch_and_import_range(
@@ -199,5 +300,67 @@ defmodule Indexer.Block.QitmeerFetcher do
     end
 
     {:ok}
+  end
+
+  defp import_supply(block_params) do
+    total_supply = calculate_total_supply(block_params)
+    latest_height = block_params.block_order
+    latest_hash = block_params.hash
+    timestamp = block_params.timestamp
+
+    case Repo.one(from(s in QitmeerSupply, order_by: [desc: s.block_height], limit: 1)) do
+      nil ->
+        total_supply = calculate_total_supply(block_params)
+        latest_height = block_params.block_order
+        latest_hash = block_params.hash
+        timestamp = block_params.timestamp
+
+      supply ->
+        latest_height = supply.block_height
+        latest_hash = supply.block_hash
+        timestamp = supply.timestamp
+    end
+
+    # Check if supply record exists
+    latest_height =
+      case Repo.get_by(QitmeerSupply,
+             block_height: latest_height
+           ) do
+        nil ->
+          # Insert new supply record
+          %QitmeerSupply{}
+          |> QitmeerSupply.changeset(%{
+            total_supply: total_supply,
+            block_height: latest_height,
+            block_hash: latest_hash,
+            timestamp: timestamp
+          })
+          |> Repo.insert!()
+
+        existing_supply ->
+          # Update existing supply record
+          existing_supply
+          |> QitmeerSupply.changeset(%{
+            total_supply: total_supply,
+            block_height: latest_height,
+            block_hash: latest_hash,
+            timestamp: timestamp
+          })
+          |> Repo.update!()
+      end
+  end
+
+  defp calculate_total_supply(block_params) do
+    # Get previous total supply
+    previous_supply =
+      case Repo.one(from(s in QitmeerSupply, order_by: [desc: s.block_height], limit: 1)) do
+        nil -> Decimal.new(0)
+        supply -> supply.total_supply
+      end
+
+    # Add coinbase amount to previous supply
+    coinbase_amount = Decimal.new(block_params.coinbase || 0)
+
+    Decimal.add(previous_supply, coinbase_amount)
   end
 end
