@@ -4,7 +4,7 @@ defmodule Explorer.Chain.Qitmeer.QitmeerAccount do
 
   @primary_key {:address, :binary, autogenerate: false}
   schema "qitmeer_accounts" do
-    field(:balance, :integer)
+    field(:balance, :decimal)
     field(:tx_count, :integer, default: 0)
     field(:utxo_count, :integer, default: 0)
 

@@ -1,8 +1,8 @@
 defmodule Explorer.QitmeerStats do
   import Ecto.Query
   alias Explorer.Repo
-  alias Explorer.Chain.QitmeerBlock
-  alias Explorer.Chain.QitmeerTransaction
+  alias Explorer.Chain.{QitmeerBlock, QitmeerTransaction}
+  alias Explorer.QitmeerDifficulty
 
   @doc """
     - block_time:
@@ -55,7 +55,7 @@ defmodule Explorer.QitmeerStats do
     total_txs / 600
   end
 
-  defp get_meer_total, do: 100_000_000
+  defp get_meer_total, do: 21_000_000
   defp get_circulating_supply, do: 80_000_000
 
   @doc """
@@ -74,14 +74,113 @@ defmodule Explorer.QitmeerStats do
   def get_hashrate_stats(_), do: {:error, :invalid_granularity}
 
   defp get_stats_by_hour do
-    %{timestamp: "2025-03-23T01:00:00Z", hashrate: 5000, difficulty: 1_000_000}
+    # Get blocks from the last hour
+    one_hour_ago = DateTime.add(DateTime.utc_now(), -3600, :second)
+
+    # Query for blocks in the last hour
+    blocks =
+      Repo.all(
+        from(b in QitmeerBlock,
+          where: b.timestamp >= ^one_hour_ago,
+          select: b.difficulty
+        )
+      )
+
+    if Enum.empty?(blocks) do
+      %{timestamp: DateTime.utc_now() |> DateTime.to_iso8601(), hashrate: 0, difficulty: 0}
+    else
+      # Calculate average difficulty
+      avg_difficulty = Enum.sum(blocks) / length(blocks)
+
+      # Convert difficulty to target
+      target = QitmeerDifficulty.compact_to_target(trunc(avg_difficulty))
+
+      # Convert target to hashrate
+      hashrate = QitmeerDifficulty.target_to_hashrate(target, calculate_average_block_time())
+
+      # Format hashrate with appropriate unit
+      {formatted_hashrate, unit} = QitmeerDifficulty.format_hashrate(hashrate)
+
+      %{
+        timestamp: DateTime.utc_now() |> DateTime.to_iso8601(),
+        hashrate: formatted_hashrate,
+        difficulty: avg_difficulty,
+        unit: unit
+      }
+    end
   end
 
   defp get_stats_by_day do
-    %{timestamp: "2025-03-22", hashrate: 120_000, difficulty: 25_000_000}
+    # Get blocks from the last 24 hours
+    one_day_ago = DateTime.add(DateTime.utc_now(), -86400, :second)
+
+    # Query for blocks in the last 24 hours
+    blocks =
+      Repo.all(
+        from(b in QitmeerBlock,
+          where: b.timestamp >= ^one_day_ago,
+          select: b.difficulty
+        )
+      )
+
+    if Enum.empty?(blocks) do
+      %{timestamp: DateTime.utc_now() |> DateTime.to_iso8601(), hashrate: 0, difficulty: 0}
+    else
+      # Calculate average difficulty
+      avg_difficulty = Enum.sum(blocks) / length(blocks)
+
+      # Convert difficulty to target
+      target = QitmeerDifficulty.compact_to_target(trunc(avg_difficulty))
+
+      # Convert target to hashrate
+      hashrate = QitmeerDifficulty.target_to_hashrate(target, calculate_average_block_time())
+
+      # Format hashrate with appropriate unit
+      {formatted_hashrate, unit} = QitmeerDifficulty.format_hashrate(hashrate)
+
+      %{
+        timestamp: DateTime.utc_now() |> DateTime.to_iso8601(),
+        hashrate: formatted_hashrate,
+        difficulty: avg_difficulty,
+        unit: unit
+      }
+    end
   end
 
   defp get_stats_by_week do
-    %{timestamp: "2025-W12", hashrate: 850_000, difficulty: 150_000_000}
+    # Get blocks from the last 7 days
+    one_week_ago = DateTime.add(DateTime.utc_now(), -604_800, :second)
+
+    # Query for blocks in the last 7 days
+    blocks =
+      Repo.all(
+        from(b in QitmeerBlock,
+          where: b.timestamp >= ^one_week_ago,
+          select: b.difficulty
+        )
+      )
+
+    if Enum.empty?(blocks) do
+      %{timestamp: DateTime.utc_now() |> DateTime.to_iso8601(), hashrate: 0, difficulty: 0}
+    else
+      # Calculate average difficulty
+      avg_difficulty = Enum.sum(blocks) / length(blocks)
+
+      # Convert difficulty to target
+      target = QitmeerDifficulty.compact_to_target(trunc(avg_difficulty))
+
+      # Convert target to hashrate
+      hashrate = QitmeerDifficulty.target_to_hashrate(target, calculate_average_block_time())
+
+      # Format hashrate with appropriate unit
+      {formatted_hashrate, unit} = QitmeerDifficulty.format_hashrate(hashrate)
+
+      %{
+        timestamp: DateTime.utc_now() |> DateTime.to_iso8601(),
+        hashrate: formatted_hashrate,
+        difficulty: avg_difficulty,
+        unit: unit
+      }
+    end
   end
 end
